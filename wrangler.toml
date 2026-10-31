@@ -1,0 +1,3 @@
+name = "aiapi-v1"
+main = "worker.js"
+compatibility_date = "2025-01-01"
