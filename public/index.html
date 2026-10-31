@@ -131,6 +131,7 @@
       </div>
       <div class="full"><label>路径（接在端点后面，例如 /v1/models 或 /v1/chat/completions）</label><input id="path" value="/v1/models"></div>
       <div class="full"><label>API Key（仅本次浏览器会话使用，不会上传到本站存储）</label><input id="apiKey" type="password" placeholder="sk-… / Bearer token / 各厂商自己的 Key 格式" autocomplete="off"></div>
+      <div class="full"><label>网关密钥 x-proxy-key（ssrf 分支必填，仅本次浏览器会话使用）</label><input id="proxyKey" type="password" placeholder="你在 Worker 里设置的 PROXY_KEY" autocomplete="off"></div>
       <div class="full"><label>请求体 JSON（GET 可留空）</label><textarea id="body" placeholder='{"model": "gpt-4o-mini", "messages": [{"role": "user", "content": "hi"}]}'></textarea></div>
     </div>
     <div class="row" style="margin-top:16px">
@@ -145,6 +146,7 @@
       <button class="tab" data-tab="py" onclick="setTab('py',this)">Python</button>
     </div>
     <pre><code id="snippet"></code></pre>
+    <p class="note">ssrf 分支提醒：所有代理请求还须带网关密钥头，例如 <code>-H "x-proxy-key: $YOUR_PROXY_KEY"</code>。在上方“网关密钥”框里填了，测试器发送时会自动带上；复制的代码示例请自行补上这一行。</p>
 
     <div class="result-head">
       <span class="badge" id="statusBadge">尚未发送</span>
@@ -282,6 +284,8 @@ async function sendTest(){
     const headers = {"Content-Type":"application/json"};
     const key = $("apiKey").value.trim();
     if(key) headers["Authorization"] = key.startsWith("Bearer ") ? key : "Bearer " + key;
+    const proxyKey = $("proxyKey").value.trim();
+    if(proxyKey) headers["x-proxy-key"] = proxyKey;
     const opts = {method:$("method").value, headers};
     if($("method").value!=="GET" && $("body").value.trim()) opts.body = $("body").value.trim();
     const res = await fetch(fullUrl(), opts);

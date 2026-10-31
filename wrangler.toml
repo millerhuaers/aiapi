@@ -1,7 +1,14 @@
-name = "aiapi"
+name = "aiapi-ssrf"
 main = "worker.js"
 compatibility_date = "2025-01-01"
 
 [assets]
 directory = "./public"
 binding = "ASSETS"
+
+# PROXY_KEY 是密钥，绝对不要写进这个文件或仓库。
+# 部署后用下面的命令设置（只存在 Cloudflare 侧）：
+#   npx wrangler secret put PROXY_KEY
+# PROXY_ALLOWED_HOSTS 不是密钥，可以在这里配置，空字符串表示关闭 /proxy：
+[vars]
+PROXY_ALLOWED_HOSTS = ""
