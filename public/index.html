@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>API Proxy · AI API 中转网关</title>
+<meta name="description" content="一个部署在 Cloudflare Workers 上的 AI API 代理网关：替换域名即可中转 OpenAI、Claude、Gemini、DeepSeek 等上游 API。">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🚀</text></svg>">
+<style>
+  :root{
+    --bg:#070b14; --bg2:#0b1222; --card:rgba(255,255,255,.05); --card2:rgba(255,255,255,.08);
+    --line:rgba(255,255,255,.10); --text:#eef2f8; --muted:#94a3b8; --muted2:#64748b;
+    --blue:#38bdf8; --violet:#a78bfa; --green:#34d399; --amber:#fbbf24; --red:#fb7185;
+    --radius:16px; --shadow:0 20px 50px rgba(0,0,0,.35);
+  }
+  *{box-sizing:border-box} html{scroll-behavior:smooth}
+  body{margin:0;background:radial-gradient(900px 480px at 15% -10%,rgba(56,189,248,.22),transparent 60%),radial-gradient(800px 420px at 90% 0,rgba(167,139,250,.20),transparent 60%),var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;line-height:1.65}
+  a{color:var(--blue)} .wrap{max-width:1160px;margin:0 auto;padding:28px 20px 60px}
+  .top{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap}
+  .logo{display:flex;align-items:center;gap:12px;font-weight:800;font-size:20px;letter-spacing:.2px}
+  .logo span{width:42px;height:42px;display:grid;place-items:center;border-radius:12px;background:linear-gradient(135deg,#38bdf8,#a78bfa);box-shadow:0 10px 30px rgba(56,189,248,.35);font-size:22px}
+  .pill{display:inline-flex;align-items:center;gap:8px;padding:7px 12px;border:1px solid var(--line);border-radius:999px;background:var(--card);font-size:13px;color:var(--muted)}
+  .dot{width:8px;height:8px;border-radius:50%;background:var(--muted2)} .dot.ok{background:var(--green);box-shadow:0 0 0 4px rgba(52,211,153,.18)} .dot.bad{background:var(--red)}
+  .hero{padding:52px 0 28px;text-align:left}
+  .hero h1{margin:0 0 14px;font-size:clamp(34px,5vw,58px);line-height:1.12;letter-spacing:-.5px}
+  .grad{background:linear-gradient(90deg,#38bdf8,#a78bfa,#f472b6);-webkit-background-clip:text;background-clip:text;color:transparent}
+  .hero p{margin:0;max-width:760px;color:var(--muted);font-size:17px}
+  .hero-actions{display:flex;gap:12px;flex-wrap:wrap;margin-top:24px}
+  .btn{border:0;cursor:pointer;border-radius:12px;padding:11px 18px;font-size:14px;font-weight:700}
+  .btn-primary{background:linear-gradient(135deg,#38bdf8,#818cf8);color:#06121f}
+  .btn-ghost{background:var(--card);color:var(--text);border:1px solid var(--line)}
+  .btn-sm{padding:7px 11px;font-size:12px;border-radius:9px}
+  .basebar{margin:24px 0;display:flex;gap:10px;flex-wrap:wrap;align-items:center;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:12px 14px}
+  .basebar code{font-size:13px;word-break:break-all;color:#bae6fd}
+  .basebar .label{font-size:12px;color:var(--muted);white-space:nowrap}
+  .grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin:22px 0}
+  .mini{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:18px}
+  .mini b{display:block;margin-bottom:6px} .mini p{margin:0;color:var(--muted);font-size:14px}
+  h2{font-size:24px;margin:38px 0 8px} .sub{color:var(--muted);margin:0 0 18px}
+  .toolbar{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px}
+  .toolbar input[type=search]{flex:1;min-width:240px;background:#0f172a;border:1px solid var(--line);color:var(--text);border-radius:12px;padding:11px 14px;outline:none}
+  .toolbar input:focus{border-color:#38bdf8}
+  .chip{border:1px solid var(--line);background:var(--card);color:var(--muted);border-radius:999px;padding:8px 13px;cursor:pointer;font-size:13px}
+  .chip.active{background:#e0f2fe;color:#082f49;border-color:transparent;font-weight:700}
+  .cards{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:16px;display:flex;flex-direction:column;gap:8px;transition:.2s}
+  .card:hover{transform:translateY(-2px);border-color:rgba(56,189,248,.45);box-shadow:var(--shadow)}
+  .card h3{margin:0;font-size:16px} .card h3 code{color:#7dd3fc;font-size:14px}
+  .target{color:var(--muted);font-size:13px;word-break:break-all;flex:1}
+  .tag{font-size:11px;color:#c4b5fd;border:1px solid rgba(167,139,250,.4);border-radius:999px;padding:2px 8px}
+  .row{display:flex;gap:8px;flex-wrap:wrap}
+  .panel{background:linear-gradient(180deg,rgba(255,255,255,.06),rgba(255,255,255,.03));border:1px solid var(--line);border-radius:20px;padding:22px;box-shadow:var(--shadow)}
+  .form{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  .form .full{grid-column:1/-1}
+  label{display:block;font-size:13px;color:var(--muted);margin-bottom:6px}
+  select,input,textarea{width:100%;background:#0f172a;border:1px solid var(--line);color:var(--text);border-radius:11px;padding:11px 12px;outline:none;font:inherit;font-size:14px}
+  select:focus,input:focus,textarea:focus{border-color:#38bdf8}
+  textarea{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;min-height:120px;resize:vertical}
+  .note{font-size:13px;color:var(--muted)} .warn{border-color:rgba(251,191,36,.4);background:rgba(251,191,36,.08)}
+  .warn b{color:#fcd34d}
+  pre{background:#020617;border:1px solid var(--line);border-radius:12px;padding:14px;overflow:auto;font-size:13px;line-height:1.6;white-space:pre-wrap;word-break:break-all}
+  pre code{color:#e2e8f0}
+  .tabs{display:flex;gap:8px;margin:14px 0} .tab{border:1px solid var(--line);background:transparent;color:var(--muted);border-radius:999px;padding:7px 13px;cursor:pointer}
+  .tab.active{background:#fff;color:#0f172a;font-weight:700}
+  .result-head{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin:16px 0 8px}
+  .badge{font-size:12px;padding:4px 9px;border-radius:999px;background:var(--card2);border:1px solid var(--line)}
+  .badge.ok{color:#6ee7b7;border-color:rgba(52,211,153,.4)} .badge.bad{color:#fda4af;border-color:rgba(251,113,133,.4)}
+  .steps{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}
+  .step{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:18px}
+  .step i{display:grid;place-items:center;width:32px;height:32px;border-radius:50%;background:#164e63;color:#7dd3fc;font-style:normal;font-weight:800;margin-bottom:10px}
+  footer{margin-top:50px;padding-top:20px;border-top:1px solid var(--line);color:var(--muted2);font-size:13px;display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap}
+  @media(max-width:900px){.cards,.grid3,.steps{grid-template-columns:1fr 1fr}.form{grid-template-columns:1fr}}
+  @media(max-width:560px){.cards,.grid3,.steps{grid-template-columns:1fr}.wrap{padding:20px 14px 44px}}
+
+  [data-theme="light"]{--bg:#eef2f7;--bg2:#ffffff;--card:rgba(255,255,255,.92);--card2:rgba(15,23,42,.06);--line:rgba(15,23,42,.14);--text:#0f172a;--muted:#475569;--muted2:#64748b}
+  [data-theme="light"] body{background:radial-gradient(900px 480px at 15% -10%,rgba(56,189,248,.18),transparent 60%),radial-gradient(800px 420px at 90% 0,rgba(167,139,250,.16),transparent 60%),var(--bg)}
+  [data-theme="light"] select,[data-theme="light"] input,[data-theme="light"] textarea{background:#ffffff;color:#0f172a}
+  [data-theme="light"] pre{background:#f1f5f9}
+  [data-theme="light"] pre code{color:#0f172a}
+  [data-theme="light"] .chip.active{background:#0284c7;color:#ffffff}
+  [data-theme="light"] .mini,[data-theme="light"] .card,[data-theme="light"] .step{box-shadow:0 10px 30px rgba(15,23,42,.06)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="top">
+    <div class="logo"><span>🚀</span> API Proxy</div>
+    <div class="row">
+      <span class="pill"><i class="dot" id="healthDot"></i><span id="healthText">正在检测网关…</span></span>
+      <a class="pill" href="#playground" style="text-decoration:none;color:inherit">在线测试 →</a>
+      <button class="pill" id="themeBtn" onclick="toggleTheme()" style="cursor:pointer;background:var(--card);color:var(--text)">☀️ 切换白天</button>
+    </div>
+  </div>
+
+  <section class="hero">
+    <h1>把上游 API 域名<br>换成这一行，<span class="grad">就能直接调用。</span></h1>
+    <p>部署在 Cloudflare Workers 上的轻量中转网关：转发 Authorization / API Key，支持流式响应与 CORS，不存你的 Key、不存请求体。选一个端点，复制地址，改一行 base_url 即可。</p>
+    <div class="hero-actions">
+      <button class="btn btn-primary" onclick="document.getElementById('endpoints').scrollIntoView()">浏览全部端点</button>
+      <button class="btn btn-ghost" onclick="document.getElementById('playground').scrollIntoView()">打开在线测试</button>
+    </div>
+    <div class="basebar">
+      <span class="label">你的网关地址（预览时可改成你的 Worker 域名）</span><input id="baseUrl" style="flex:1;min-width:260px">
+      <button class="btn btn-ghost btn-sm" onclick="copyText(document.getElementById('baseUrl').value,this)">复制</button>
+      <span class="note" id="copyTip"></span>
+    </div>
+  </section>
+
+  <section class="grid3">
+    <div class="mini"><b>🔑 不存 Key</b><p>Key 只在浏览器里填、只随本次请求转发到你选的上游，不经过本站存储。</p></div>
+    <div class="mini"><b>🌊 支持流式</b><p>聊天补全的 SSE 流式输出可直接透传，不会被网关截断或缓冲。</p></div>
+    <div class="mini"><b>🌐 开箱即用</b><p>浏览器端应用可直接调用，已开启 CORS，无需自己再搭后端中转。</p></div>
+  </section>
+
+  <h2 id="endpoints">可用端点 <span style="font-size:14px;color:var(--muted);font-weight:400" id="count"></span></h2>
+  <p class="sub">点「填入测试」会把该端点带入下面的在线测试；点「复制地址」得到可直接替换的上游 base_url。</p>
+  <div class="toolbar">
+    <input type="search" id="search" placeholder="搜索 openai / deepseek / 语音 / 向量…" oninput="render()">
+    <div class="row" id="cats"></div>
+  </div>
+  <div class="cards" id="cards"></div>
+  <p class="note" id="empty" style="display:none">没有匹配的端点，换个关键词试试。</p>
+
+  <h2 id="playground">在线测试</h2>
+  <p class="sub">先在上游官网申请 Key，再在这里发一次真实请求验证链路。只建议用只读接口（如 <code>/v1/models</code>）做连通性测试。</p>
+  <div class="panel">
+    <div class="form">
+      <div><label>选择端点</label><select id="provider"></select></div>
+      <div><label>请求方法</label>
+        <select id="method"><option>GET</option><option>POST</option><option>PUT</option><option>PATCH</option><option>DELETE</option></select>
+      </div>
+      <div class="full"><label>路径（接在端点后面，例如 /v1/models 或 /v1/chat/completions）</label><input id="path" value="/v1/models"></div>
+      <div class="full"><label>API Key（仅本次浏览器会话使用，不会上传到本站存储）</label><input id="apiKey" type="password" placeholder="sk-… / Bearer token / 各厂商自己的 Key 格式" autocomplete="off"></div>
+      <div class="full"><label>请求体 JSON（GET 可留空）</label><textarea id="body" placeholder='{"model": "gpt-4o-mini", "messages": [{"role": "user", "content": "hi"}]}'></textarea></div>
+    </div>
+    <div class="row" style="margin-top:16px">
+      <button class="btn btn-primary" id="sendBtn" onclick="sendTest()">发送请求</button>
+      <button class="btn btn-ghost" onclick="copyText(fullUrl(),this)">复制完整请求地址</button>
+      <span class="note" id="fullUrl" style="word-break:break-all"></span>
+    </div>
+
+    <div class="tabs">
+      <button class="tab active" data-tab="curl" onclick="setTab('curl',this)">cURL</button>
+      <button class="tab" data-tab="js" onclick="setTab('js',this)">JavaScript</button>
+      <button class="tab" data-tab="py" onclick="setTab('py',this)">Python</button>
+    </div>
+    <pre><code id="snippet"></code></pre>
+
+    <div class="result-head">
+      <span class="badge" id="statusBadge">尚未发送</span>
+      <span class="badge" id="timeBadge">— ms</span>
+      <span class="badge" id="sizeBadge">—</span>
+      <button class="btn btn-ghost btn-sm" onclick="copyText(document.getElementById('result').textContent,this)">复制响应</button>
+    </div>
+    <pre><code id="result">还没发送请求。建议先用 GET /v1/models 验证 Key 和链路是否通。</code></pre>
+  </div>
+
+  <h2>三步接入</h2>
+  <div class="steps">
+    <div class="step"><i>1</i><b>复制端点地址</b><p class="note">例如 OpenAI：<code id="ex1"></code></p></div>
+    <div class="step"><i>2</i><b>替换 base_url</b><p class="note">把 SDK / 客户端里的官方域名换成上面这一行，其余代码不用改。</p></div>
+    <div class="step"><i>3</i><b>照常用 Key 调用</b><p class="note">Authorization 头原样转发，上游计费、限速、模型权限都不变。</p></div>
+  </div>
+
+  <div class="panel warn" style="margin-top:22px">
+    <b>⚠️ 关于 /proxy 通用代理：</b>
+    <p class="note" style="margin:6px 0 0">原版 <code>/proxy?url=任意地址</code> 是开放式代理，任何人都能借你的 Worker 访问任意网址，容易被滥用、刷流量甚至触发上游封禁。生产部署建议：关掉它，或改成白名单域名 + 必须携带你自己的网关密钥，详见部署说明。</p>
+  </div>
+
+  <footer>
+    <span>API Proxy · Cloudflare Workers · 不存储 API Key 与请求数据</span>
+    <span><a href="/health">健康检查 /health</a> · <a href="/robots.txt">robots.txt</a></span>
+  </footer>
+</div>
+
+<script>
+const ENDPOINTS = [
+  ["openai","https://api.openai.com","主流","/v1/models"],
+  ["claude","https://api.anthropic.com","主流","/v1/models"],
+  ["gemini","https://generativelanguage.googleapis.com","主流","/v1beta/models"],
+  ["xai","https://api.x.ai","主流","/v1/models"],
+  ["cohere","https://api.cohere.com","主流","/v1/models"],
+  ["vertex","https://us-central1-aiplatform.googleapis.com/v1/publishers","主流","/google/models"],
+  ["deepseek","https://api.deepseek.com","国产","/v1/models"],
+  ["moonshot","https://api.moonshot.cn","国产","/v1/models"],
+  ["zhipu","https://open.bigmodel.cn/api/paas/v4","国产","/models"],
+  ["openrouter","https://openrouter.ai/api","聚合","/v1/models"],
+  ["groq","https://api.groq.com/openai","聚合","/v1/models"],
+  ["siliconflow","https://api.siliconflow.cn","聚合","/v1/models"],
+  ["together","https://api.together.xyz","聚合","/v1/models"],
+  ["fireworks","https://api.fireworks.ai","聚合","/v1/models"],
+  ["novita","https://api.novita.ai","聚合","/v1/models"],
+  ["portkey","https://api.portkey.ai","聚合","/v1/models"],
+  ["github","https://models.inference.ai.azure.com","聚合","/models"],
+  ["replicate","https://api.replicate.com","聚合","/v1/models"],
+  ["akash","https://chatapi.akash.network/api","聚合","/v1/models"],
+  ["cerebras","https://api.cerebras.ai","聚合","/v1/models"],
+  ["nvidia","https://integrate.api.nvidia.com","聚合","/v1/models"],
+  ["hf","https://api-inference.huggingface.co","开源","/models"],
+  ["mistral","https://api.mistral.ai","开源","/v1/models"],
+  ["perplexity","https://api.perplexity.ai","开源","/v1/models"],
+  ["stability","https://api.stability.ai","多模态","/v1/engines/list"],
+  ["elevenlabs","https://api.elevenlabs.io","多模态","/v1/models"],
+  ["voyage","https://api.voyageai.com","多模态","/v1/models"],
+  ["midjourney","https://api.midjourney.com","多模态","/"],
+  ["discord","https://discord.com/api","社交","/v10/users/@me"],
+  ["telegram","https://api.telegram.org","社交","/bot<token>/getMe"],
+];
+const CATS = ["全部","主流","国产","聚合","开源","多模态","社交"];
+let activeCat = "全部", activeTab = "curl";
+const $ = id => document.getElementById(id);
+let origin = location.protocol.startsWith("http") ? location.origin.replace(/\/$/,"") : "https://your-worker.workers.dev";
+$("baseUrl").value = origin;
+$("ex1").textContent = origin + "/openai";
+$("baseUrl").addEventListener("input", () => {
+  origin = $("baseUrl").value.trim().replace(/\/$/,"") || origin;
+  $("ex1").textContent = origin + "/openai";
+  render(); updateSnippet();
+});
+
+function esc(s){return String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]))}
+function copyText(t,btn){
+  navigator.clipboard.writeText(t).then(()=>{
+    const old = btn ? btn.textContent : "";
+    if(btn){btn.textContent="已复制 ✓"; setTimeout(()=>btn.textContent=old,1500);}
+    $("copyTip").textContent = "已复制到剪贴板";
+  }).catch(()=>{ $("copyTip").textContent = "复制失败，请手动选中复制"; });
+}
+function renderCats(){
+  $("cats").innerHTML = CATS.map(c=>`<button class="chip ${c===activeCat?'active':''}" onclick="activeCat='${c}';renderCats();render()">${c}</button>`).join("");
+}
+function render(){
+  const q = $("search").value.trim().toLowerCase();
+  const list = ENDPOINTS.filter(([p,t,cat]) => (activeCat==="全部"||cat===activeCat) && (!q || p.includes(q) || t.toLowerCase().includes(q) || cat.includes(q)));
+  $("count").textContent = `共 ${list.length} 个`;
+  $("empty").style.display = list.length ? "none" : "block";
+  $("cards").innerHTML = list.map(([p,t,cat,ex])=>`
+    <article class="card">
+      <h3>/${esc(p)} <span class="tag">${esc(cat)}</span></h3>
+      <div class="target">${esc(t)}</div>
+      <div class="note">示例：<code>${esc(p)}${esc(ex)}</code></div>
+      <div class="row">
+        <button class="btn btn-ghost btn-sm" onclick="copyText('${origin}/${p}',this)">复制地址</button>
+        <button class="btn btn-ghost btn-sm" onclick="useEndpoint('${p}','${ex}')">填入测试 ↓</button>
+      </div>
+    </article>`).join("");
+}
+function fillProviders(){
+  $("provider").innerHTML = ENDPOINTS.map(([p])=>`<option value="${p}">/${p}</option>`).join("");
+}
+function fullUrl(){
+  const p = $("provider").value, path = $("path").value.trim() || "/";
+  return origin + "/" + p + (path.startsWith("/") ? path : "/" + path);
+}
+function useEndpoint(p,ex){
+  $("provider").value = p; $("path").value = ex; updateSnippet();
+  document.getElementById("playground").scrollIntoView({behavior:"smooth"});
+}
+function updateSnippet(){
+  const url = fullUrl(), method = $("method").value;
+  const body = $("body").value.trim();
+  let out = "";
+  if(activeTab==="curl"){
+    out = `curl ${url} \\\n  -H "Authorization: Bearer $YOUR_API_KEY"${method!=="GET" ? ` \\\n  -X ${method} \\\n  -H "Content-Type: application/json" \\\n  -d '${body || "{}"}'` : ""}`;
+  } else if(activeTab==="js"){
+    out = `const res = await fetch("${url}", {\n  method: "${method}",\n  headers: { "Authorization": "Bearer $YOUR_API_KEY"${method!=="GET" ? `,\n    "Content-Type": "application/json"` : ""} }${method!=="GET" ? `,\n  body: JSON.stringify(${body || "{}"})` : ""}\n});\nconst data = await res.json();\nconsole.log(data);`;
+  } else {
+    out = `import requests\n\nres = requests.${method.toLowerCase()}("${url}",\n    headers={"Authorization": "Bearer $YOUR_API_KEY"}${method!=="GET" ? `,\n    json=${body || "{}"}` : ""})\nprint(res.status_code)\nprint(res.json())`;
+  }
+  $("snippet").textContent = out;
+  $("fullUrl").textContent = url;
+}
+function setTab(t,btn){
+  activeTab = t;
+  document.querySelectorAll(".tab").forEach(b=>b.classList.toggle("active", b===btn));
+  updateSnippet();
+}
+async function sendTest(){
+  const btn = $("sendBtn"); btn.disabled = true; btn.textContent = "发送中…";
+  const started = performance.now();
+  try{
+    const headers = {"Content-Type":"application/json"};
+    const key = $("apiKey").value.trim();
+    if(key) headers["Authorization"] = key.startsWith("Bearer ") ? key : "Bearer " + key;
+    const opts = {method:$("method").value, headers};
+    if($("method").value!=="GET" && $("body").value.trim()) opts.body = $("body").value.trim();
+    const res = await fetch(fullUrl(), opts);
+    const text = await res.text();
+    const ms = Math.round(performance.now()-started);
+    $("statusBadge").textContent = res.status + " " + res.statusText;
+    $("statusBadge").className = "badge " + (res.ok ? "ok" : "bad");
+    $("timeBadge").textContent = ms + " ms";
+    $("sizeBadge").textContent = new Blob([text]).size + " bytes";
+    try{ $("result").textContent = JSON.stringify(JSON.parse(text), null, 2); }
+    catch{ $("result").textContent = text.slice(0, 8000) || "(空响应)"; }
+  }catch(e){
+    $("statusBadge").textContent = "请求失败"; $("statusBadge").className = "badge bad";
+    $("timeBadge").textContent = "—"; $("sizeBadge").textContent = "—";
+    $("result").textContent = "请求失败：" + e.message + "\n\n常见原因：浏览器 CORS、网关未部署、Key 格式不对，或该上游路径不存在。先用 GET /v1/models 验证。";
+  }finally{ btn.disabled = false; btn.textContent = "发送请求"; }
+}
+async function checkHealth(){
+  try{
+    const r = await fetch(origin + "/health");
+    const ok = r.ok;
+    $("healthDot").className = "dot " + (ok ? "ok" : "bad");
+    $("healthText").textContent = ok ? "网关正常 · /health OK" : "健康检查异常";
+  }catch{
+    $("healthDot").className = "dot bad";
+    $("healthText").textContent = "无法连接网关（本地预览时正常）";
+  }
+}
+["provider","method","path","body"].forEach(id=>$(id).addEventListener("input", updateSnippet));
+["provider","method"].forEach(id=>$(id).addEventListener("change", updateSnippet));
+
+function applyTheme(mode){
+  document.documentElement.setAttribute("data-theme", mode);
+  const b = $("themeBtn");
+  if (b) b.textContent = mode === "light" ? "🌙 切换黑夜" : "☀️ 切换白天";
+  try { localStorage.setItem("api-proxy-theme", mode); } catch (e) {}
+}
+function toggleTheme(){
+  applyTheme(document.documentElement.getAttribute("data-theme") === "light" ? "dark" : "light");
+}
+(function initTheme(){
+  let mode = "dark";
+  try {
+    mode = localStorage.getItem("api-proxy-theme") || (window.matchMedia && window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark");
+  } catch (e) {}
+  applyTheme(mode === "light" ? "light" : "dark");
+})();
+renderCats(); render(); fillProviders(); updateSnippet(); checkHealth();
+</script>
+</body>
+</html>
